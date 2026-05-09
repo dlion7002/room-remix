@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Project {
+  id                String             @id @default(cuid())
+  title             String
+  status            String             @default("draft")
+  activeRoomStateId String?
+  activePreviewId   String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  photos            RoomPhoto[]
+  roomStates        RoomState[]
+  previews          Preview[]
+  interactionEvents InteractionEvent[]
+
+  @@index([status])
+}
+
+model RoomPhoto {
+  id               String   @id @default(cuid())
+  projectId        String
+  originalImageUrl String
+  width            Int?
+  height           Int?
+  uploadedAt       DateTime @default(now())
+  isSourceOfTruth  Boolean  @default(true)
+
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model RoomState {
+  id           String   @id @default(cuid())
+  projectId    String
+  version      Int
+  roomShell    Json
+  camera       Json
+  grid         Json
+  objects      Json
+  relations    Json
+  editContract Json
+  preferences  Json?
+  designPlan   Json?
+  patches      Json
+  source       String
+  createdAt    DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  previews     Preview[]
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
+
+model Preview {
+  id                 String          @id @default(cuid())
+  projectId          String
+  roomStateId         String
+  generatedImageUrl   String
+  promptSummary       String
+  generationProvider  String
+  userFidelityStatus  String?
+  createdAt           DateTime        @default(now())
+
+  project             Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roomState           RoomState       @relation(fields: [roomStateId], references: [id], onDelete: Cascade)
+  fidelityReport      FidelityReport?
+
+  @@index([projectId])
+  @@index([roomStateId])
+}
+
+model FidelityReport {
+  id                       String   @id @default(cuid())
+  previewId                String   @unique
+  systemScore              Float
+  windowPreserved          Boolean
+  cameraAnglePreserved     Boolean
+  bedPositionPreserved     Boolean
+  deskPositionPreserved    Boolean
+  lockedObjectsPreserved   Boolean
+  styleApplied             Boolean
+  unexpectedChanges        Json
+  recommendedAction        String
+  userFeedback             Json?
+  createdAt                DateTime @default(now())
+
+  preview                  Preview  @relation(fields: [previewId], references: [id], onDelete: Cascade)
+}
+
+model InteractionEvent {
+  id            String   @id @default(cuid())
+  projectId     String
+  type          String
+  inputSummary  String
+  outputSummary String
+  payload       Json?
+  createdAt     DateTime @default(now())
+
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([type])
+}
+
