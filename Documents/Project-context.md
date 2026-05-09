@@ -271,6 +271,8 @@ Use at least one event-relevant technology if available:
 - Prefer **CopilotKit + AG-UI** if the starter kit supports it because the project uses React.
 - Consider **A2UI** if the event starter kit provides a clear component protocol.
 - Consider **MCP Apps / MCP tools** if the starter kit provides ready-to-use tool wiring.
+- Lang chain and lan graph
+
 
 The frontend should include a component catalog that the agent can fill with structured outputs:
 
