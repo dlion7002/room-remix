@@ -59,6 +59,13 @@ src/lib/types/room-remix.ts
 Defines the canonical Room State and structured outputs. This is the contract that keeps the agent from becoming random chat.
 
 ```text
+src/lib/agent/langchain-tools.ts
+src/lib/agent/room-remix-graph.ts
+```
+
+Shows the minimal LangChain Core tool wrappers and LangGraph StateGraph workflows. This is the CV-friendly agent runtime: graph orchestration, typed tools, provider adapters, Room State, and fidelity validation.
+
+```text
 src/lib/ai/provider.ts
 src/lib/ai/mock-provider.ts
 src/lib/ai/prompts.ts
@@ -71,7 +78,7 @@ src/lib/orchestrator/tools.ts
 src/lib/orchestrator/room-remix-orchestrator.ts
 ```
 
-This is the real agent workflow: analyze, build state, patch state, plan, preview, validate fidelity, record user feedback.
+This is the persistence workflow around the graph: save projects, version Room State, call LangGraph runners, persist previews, validate fidelity, and record user feedback.
 
 ```text
 src/lib/generative-ui/component-registry.ts
@@ -126,9 +133,17 @@ ROOM_REMIX_AI_PROVIDER="mock"
 
 That is intentional. It lets you learn the agent flow before connecting real model APIs.
 
+## Agent Runtime Summary
+
+```text
+UI -> API route -> Prisma orchestrator -> LangGraph StateGraph -> LangChain Core tools + RoomAiProvider
+```
+
+LangGraph coordinates the multi-step agent flow. LangChain Core is used only for deterministic tools. The custom provider adapter still owns model-specific calls, so mock mode and future real providers use the same graph.
+
 ## Known Limitations
 
 - The mock preview is a placeholder image.
 - The fidelity report is simulated.
 - Uploaded images are stored locally in `public/uploads`.
-- The agent provider is designed to be swapped later.
+- The agent provider is designed to be swapped later without changing the LangGraph workflow.

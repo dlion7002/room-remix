@@ -24,15 +24,18 @@ import type {
 interface AnalyzeRoomResponse {
   analysis: RawRoomAnalysis;
   roomState: RoomStateSnapshot;
+  agentTrace?: TraceEvent[];
 }
 
 interface RoomStateResponse {
   roomState: RoomStateSnapshot;
+  agentTrace?: TraceEvent[];
 }
 
 interface PreviewResponse {
   preview: PreviewResult & { id: string };
   fidelityReport: FidelityReport;
+  agentTrace?: TraceEvent[];
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -63,6 +66,16 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
+function formatTraceTime(createdAt: string) {
+  const date = new Date(createdAt);
+
+  if (Number.isNaN(date.getTime())) {
+    return createdAt;
+  }
+
+  return date.toLocaleTimeString();
+}
+
 export function RoomRemixWorkbench() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | undefined>();
@@ -85,6 +98,28 @@ export function RoomRemixWorkbench() {
     ]);
   }
 
+  function pushAgentTrace(
+    agentTrace: TraceEvent[] | undefined,
+    fallbackType: string,
+    fallbackSummary: string,
+  ) {
+    if (!agentTrace?.length) {
+      pushEvent(fallbackType, fallbackSummary);
+      return;
+    }
+
+    setEvents((current) => [
+      ...agentTrace
+        .slice()
+        .reverse()
+        .map((event) => ({
+          ...event,
+          createdAt: formatTraceTime(event.createdAt),
+        })),
+      ...current,
+    ]);
+  }
+
   async function analyzeRoom() {
     if (!projectId) return;
     setLoadingStep("analyze");
@@ -98,7 +133,11 @@ export function RoomRemixWorkbench() {
 
       setAnalysis(data.analysis);
       setRoomState(data.roomState);
-      pushEvent("room.analyze", "Created the first structured Room State.");
+      pushAgentTrace(
+        data.agentTrace,
+        "room.analyze",
+        "Created the first structured Room State.",
+      );
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -149,7 +188,11 @@ export function RoomRemixWorkbench() {
       );
 
       setRoomState(data.roomState);
-      pushEvent("design.generate_plan", "Generated design board and atomic patches.");
+      pushAgentTrace(
+        data.agentTrace,
+        "design.generate_plan",
+        "Generated design board and atomic patches.",
+      );
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -173,7 +216,11 @@ export function RoomRemixWorkbench() {
         ...data.fidelityReport,
         unexpectedChanges: data.fidelityReport.unexpectedChanges ?? [],
       });
-      pushEvent("preview.generate", "Generated preview and fidelity report.");
+      pushAgentTrace(
+        data.agentTrace,
+        "preview.generate",
+        "Generated preview and fidelity report.",
+      );
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -281,4 +328,3 @@ export function RoomRemixWorkbench() {
     </main>
   );
 }
-

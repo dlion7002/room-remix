@@ -10,9 +10,9 @@ export async function POST(request: Request, context: RouteContext) {
   try {
     const { projectId } = await context.params;
     const preferences = designPreferencesSchema.parse(await request.json());
-    const roomState = await generatePlanForProject({ projectId, preferences });
+    const result = await generatePlanForProject({ projectId, preferences });
 
-    return NextResponse.json({ roomState });
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Design planning failed." },
@@ -20,4 +20,3 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 }
-

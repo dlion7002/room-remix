@@ -239,6 +239,12 @@ export interface InteractionEventView {
   createdAt: string;
 }
 
+export interface AgentTraceEvent {
+  type: string;
+  summary: string;
+  createdAt: string;
+}
+
 export interface DesignCatalogItem {
   id: string;
   name: string;
@@ -250,4 +256,3 @@ export interface DesignCatalogItem {
   placementSuggestions: string[];
   constraintsCompatibility: DesignConstraint[];
 }
-

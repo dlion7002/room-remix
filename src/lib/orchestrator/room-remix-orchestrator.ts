@@ -1,12 +1,12 @@
 import { Prisma, type RoomState as RoomStateRecord } from "@/generated/prisma/client";
-import { getRoomAiProvider } from "@/lib/ai";
-import { getGenericCatalogOptions } from "@/lib/catalog/design-catalog";
-import { db } from "@/lib/db";
 import {
-  buildPreviewPrompt,
-  buildRoomStateFromAnalysis,
-  mergeRoomStatePatch,
-} from "@/lib/orchestrator/tools";
+  runDesignPlanGraph,
+  runPreviewGraph,
+  runRoomAnalysisGraph,
+} from "@/lib/agent/room-remix-graph";
+import { getRoomAiProvider } from "@/lib/ai";
+import { db } from "@/lib/db";
+import { mergeRoomStatePatch } from "@/lib/orchestrator/tools";
 import type {
   DesignPreferences,
   FidelityStatus,
@@ -55,20 +55,16 @@ export async function captureRoomProject(input: {
 export async function analyzeProjectRoom(projectId: string) {
   const provider = getRoomAiProvider();
   const photo = await getSourcePhoto(projectId);
-  const analysis = await provider.analyzeRoom({
+  const nextVersion = await getNextRoomStateVersion(projectId);
+  const graphResult = await runRoomAnalysisGraph({
     projectId,
     imageUrl: photo.originalImageUrl,
+    provider,
+    version: nextVersion,
   });
 
-  const nextVersion = await getNextRoomStateVersion(projectId);
-  const roomState = {
-    ...buildRoomStateFromAnalysis(analysis),
-    projectId,
-    version: nextVersion,
-  };
-
   const savedRoomState = await db.roomState.create({
-    data: serializeRoomState(projectId, roomState),
+    data: serializeRoomState(projectId, graphResult.roomState),
   });
 
   await db.project.update({
@@ -80,16 +76,20 @@ export async function analyzeProjectRoom(projectId: string) {
         create: {
           type: "room.analyze",
           inputSummary: "Analyzed source room photo.",
-          outputSummary: analysis.summary,
-          payload: asJson({ analysis }),
+          outputSummary: graphResult.analysis.summary,
+          payload: asJson({
+            analysis: graphResult.analysis,
+            agentTrace: graphResult.agentTrace,
+          }),
         },
       },
     },
   });
 
   return {
-    analysis,
+    analysis: graphResult.analysis,
     roomState: toRoomStateSnapshot(savedRoomState),
+    agentTrace: graphResult.agentTrace,
   };
 }
 
@@ -130,32 +130,15 @@ export async function generatePlanForProject(input: {
 }) {
   const provider = getRoomAiProvider();
   const current = await getActiveRoomState(input.projectId);
-  const catalogOptions = getGenericCatalogOptions({
-    style: input.preferences.style,
-    budget: input.preferences.budget,
-    constraints: input.preferences.constraints,
-  });
-
-  const designPlan = await provider.generateDesignPlan({
+  const graphResult = await runDesignPlanGraph({
     projectId: input.projectId,
-    roomState: current,
+    provider,
+    currentRoomState: current,
     preferences: input.preferences,
-    catalogOptions,
   });
-
-  const next: RoomStateSnapshot = {
-    ...current,
-    id: undefined,
-    version: current.version + 1,
-    preferences: input.preferences,
-    designPlan,
-    patches: designPlan.designPatches,
-    source: "user_patch",
-    createdAt: new Date().toISOString(),
-  };
 
   const savedRoomState = await db.roomState.create({
-    data: serializeRoomState(input.projectId, next),
+    data: serializeRoomState(input.projectId, graphResult.roomState),
   });
 
   await db.project.update({
@@ -168,13 +151,20 @@ export async function generatePlanForProject(input: {
           type: "design.generate_plan",
           inputSummary: `${input.preferences.style} / ${input.preferences.budget} / ${input.preferences.goal}`,
           outputSummary: "Generated design board and design patches.",
-          payload: asJson({ preferences: input.preferences, designPlan }),
+          payload: asJson({
+            preferences: input.preferences,
+            designPlan: graphResult.designPlan,
+            agentTrace: graphResult.agentTrace,
+          }),
         },
       },
     },
   });
 
-  return toRoomStateSnapshot(savedRoomState);
+  return {
+    roomState: toRoomStateSnapshot(savedRoomState),
+    agentTrace: graphResult.agentTrace,
+  };
 }
 
 export async function generatePreviewForProject(projectId: string) {
@@ -182,44 +172,36 @@ export async function generatePreviewForProject(projectId: string) {
   const photo = await getSourcePhoto(projectId);
   const roomState = await getActiveRoomState(projectId);
   const roomStateId = assertPersistedRoomStateId(roomState);
-  const prompt = buildPreviewPrompt(roomState);
-
-  const previewResult = await provider.generatePreview({
+  const graphResult = await runPreviewGraph({
     projectId,
+    provider,
+    originalImageUrl: photo.originalImageUrl,
     roomState,
-    prompt,
   });
 
   const preview = await db.preview.create({
     data: {
       projectId,
       roomStateId,
-      generatedImageUrl: previewResult.generatedImageUrl,
-      promptSummary: previewResult.promptSummary,
-      generationProvider: previewResult.generationProvider,
+      generatedImageUrl: graphResult.previewResult.generatedImageUrl,
+      promptSummary: graphResult.previewResult.promptSummary,
+      generationProvider: graphResult.previewResult.generationProvider,
     },
-  });
-
-  const fidelityReport = await provider.validateFidelity({
-    projectId,
-    originalImageUrl: photo.originalImageUrl,
-    generatedImageUrl: preview.generatedImageUrl,
-    roomState,
   });
 
   const savedReport = await db.fidelityReport.create({
     data: {
       previewId: preview.id,
-      systemScore: fidelityReport.systemScore,
-      windowPreserved: fidelityReport.windowPreserved,
-      cameraAnglePreserved: fidelityReport.cameraAnglePreserved,
-      bedPositionPreserved: fidelityReport.bedPositionPreserved,
-      deskPositionPreserved: fidelityReport.deskPositionPreserved,
-      lockedObjectsPreserved: fidelityReport.lockedObjectsPreserved,
-      styleApplied: fidelityReport.styleApplied,
-      unexpectedChanges: asJson(fidelityReport.unexpectedChanges),
-      recommendedAction: fidelityReport.recommendedAction,
-      userFeedback: asNullableJson(fidelityReport.userFeedback),
+      systemScore: graphResult.fidelityReport.systemScore,
+      windowPreserved: graphResult.fidelityReport.windowPreserved,
+      cameraAnglePreserved: graphResult.fidelityReport.cameraAnglePreserved,
+      bedPositionPreserved: graphResult.fidelityReport.bedPositionPreserved,
+      deskPositionPreserved: graphResult.fidelityReport.deskPositionPreserved,
+      lockedObjectsPreserved: graphResult.fidelityReport.lockedObjectsPreserved,
+      styleApplied: graphResult.fidelityReport.styleApplied,
+      unexpectedChanges: asJson(graphResult.fidelityReport.unexpectedChanges),
+      recommendedAction: graphResult.fidelityReport.recommendedAction,
+      userFeedback: asNullableJson(graphResult.fidelityReport.userFeedback),
     },
   });
 
@@ -232,8 +214,12 @@ export async function generatePreviewForProject(projectId: string) {
         create: {
           type: "preview.generate",
           inputSummary: "Generated preview from original image and active Room State.",
-          outputSummary: `Fidelity score: ${fidelityReport.systemScore}`,
-          payload: asJson({ prompt, previewId: preview.id }),
+          outputSummary: `Fidelity score: ${graphResult.fidelityReport.systemScore}`,
+          payload: asJson({
+            prompt: graphResult.prompt,
+            previewId: preview.id,
+            agentTrace: graphResult.agentTrace,
+          }),
         },
       },
     },
@@ -242,6 +228,7 @@ export async function generatePreviewForProject(projectId: string) {
   return {
     preview,
     fidelityReport: savedReport,
+    agentTrace: graphResult.agentTrace,
   };
 }
 
